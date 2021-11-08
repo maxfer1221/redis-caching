@@ -1,6 +1,6 @@
 use tiny_http::{Server, Response, Request, Method, Header};
 use redis;
-use std::{io::{Error, ErrorKind, Cursor}, path::PathBuf, fs::File};
+use std::{time::Instant, io::{Error, ErrorKind, Cursor}, path::PathBuf, fs::File};
 use json::{JsonValue, parse};
 
 enum ResponseType {
@@ -70,8 +70,16 @@ fn main() {
 
 
         match match response {
-            ResponseType::File(f) => request.respond(f),
-            ResponseType::Curs(c) => request.respond(c),
+            ResponseType::File(mut f) => {
+                f.add_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+                f.add_header(Header::from_bytes(&b"Access-Control-Request-Headers"[..], &b"*"[..]).unwrap());
+                request.respond(f)
+            },
+            ResponseType::Curs(mut c) => {
+                c.add_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+                c.add_header(Header::from_bytes(&b"Access-Control-Request-Headers"[..], &b"*"[..]).unwrap());
+                request.respond(c)
+            }
         } {
             Err(e) => {
                 println!("Error responding to request: {:?}", e);
@@ -123,8 +131,10 @@ fn db_handler(_req: &Request) -> Result<Response<File>, Error> {
 
 fn cache_handler(req: &mut Request, con: &mut redis::Connection) -> Result<Response<Cursor<Vec<u8>>>, Error> {
     let cmd: redis::Cmd = parse_input(req)?;
+    let now = Instant::now();
     let redis_response: redis::Value = cmd.query(con).map_err(|_e| Error::new(ErrorKind::Other, "Could not apply command to cache"))?;
-    let mut r = Response::from_string::<String>(format!("{:?}", redis_response).into());
+    let elapsed = now.elapsed();
+    let r = Response::from_string::<String>(format!("{:?}", redis_response).into());
     Ok(r)
     //Ok(r)
     // println!("{:?}", cmd);
@@ -133,12 +143,6 @@ fn cache_handler(req: &mut Request, con: &mut redis::Connection) -> Result<Respo
     //     Method::Get => Response::from_string("GET"),
     //     _ => Response::from_string("Method not implemented"),
     // }
-}
-
-fn increment(con: &mut redis::Connection) -> redis::RedisResult<u64> {
-    let r : u64 = redis::cmd("INCR").arg("visit_count").query(con)?;
-
-    Ok(r)
 }
 
 fn get_file(name: &str) -> Result<File, Error> {
@@ -152,13 +156,13 @@ fn parse_input(req: &mut Request) -> Result<redis::Cmd, Error> {
     req.as_reader().read_to_string(&mut content)?;
     let json: JsonValue = match parse(&content) {
         Ok(j) => Ok(j),
-        Err(e) => {
+        Err(_e) => {
             Err(Error::new(ErrorKind::Other, "Could not parse string to json"))
         }
     }?;
 
     let cmd_as_string: String = json["cmd"].to_string();
-    let mut iter = cmd_as_string.split_whitespace();
+    let iter = cmd_as_string.split_whitespace();
     let cmd = functions::Function::from(iter);
 
     cmd?.command()
@@ -213,12 +217,11 @@ mod functions {
             }?)?;
             match f {
                 FunctionType::Set => {
-                    let vtype: Type = vtype_from_str(&mut iter)?;
-                    let vname: &str = vname_from_str(iter.next())?;
+                    let (vtype, vname): (Type, String) = vtype_from_str(&mut iter)?;
                     Ok(Function {
                         ftype: f,
                         vtype: Some(vtype),
-                        vname: vname.into(),
+                        vname: vname,
                     })
                 },
                 _ => match iter.next() {
@@ -287,26 +290,31 @@ mod functions {
                 None => Err(Error::new(ErrorKind::Other, "String may be missing a quotation mark")),
             }?;
         }
-        let str_to_push: &str = &String::from(s)[..(s.find("\"").unwrap() - 1)];
+        let str_to_push: &str = &String::from(next)[..(next.find("\"").unwrap())];
+        r.push_str(" ");
         r.push_str(str_to_push);
         Ok(r)
     }
 
     fn i64_value(i: &mut SplitWhitespace) -> Result<i64, Error> {
+        println!("{:?}", i);
         match i.next() {
             Some(i) => i.parse::<i64>().map_err(|_e| Error::new(ErrorKind::Other, "Could not convert value to integer")),
             None => Err(Error::new(ErrorKind::Other, "Value not found")),
         }
     }
 
-    fn vtype_from_str(i: &mut SplitWhitespace) -> Result<Type, Error> {
-        match i.next() {
+    fn vtype_from_str(i: &mut SplitWhitespace) -> Result<(Type, String), Error> {
+        let type_as_str: Option<&str> = i.next();
+        let vname: &str = vname_from_str(i.next())?;
+        let vtype: Type = match type_as_str {
             Some(s) => match s {
                 "int" => Ok(Type::Int(i64_value(i)?)),
                 "string" => Ok(Type::Str(string_value(i.next(), i)?.to_string())),
                 _ => Err(Error::new(ErrorKind::Other, "Type not found")),
             },
             None => Err(Error::new(ErrorKind::Other, "Type not found")),
-        }
+        }?;
+        Ok((vtype, vname.into()))
     }
 }
