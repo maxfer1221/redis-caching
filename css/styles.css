@@ -1,0 +1,56 @@
+body {
+  background-color: #012135;
+  color: #aaa;
+  margin: 30px;
+  font-family: "Geomanist Book", sans-serif;
+}
+
+p, ul {
+  font-size: 20px;
+}
+
+h1,h2,h3,h4,h5,h6 {
+  color: white;
+}
+
+th {
+  color: white;
+}
+
+td {
+  padding-top: 20px;
+  padding-right: 30px;
+}
+
+table, td {
+  text-align: left;
+  vertical-align: top;
+}
+
+input {
+  padding: 5px;
+  border-radius: 2px;
+  background-color:  #1d4056 ;
+  border: none;
+  color: white
+}
+
+.button {
+  width: 100px;
+}
+.button:hover {
+  background-color: #2e5167
+}
+
+.output {
+  word-wrap: break-word;
+  padding: 5px;
+  background-color:  #1d4056 ;
+  max-width: 700px;
+  width: 700px;
+  display: inline-block;
+  min-height: 100px;
+  margin: 0;
+  border-radius: 5px;
+  font-size: 16px;
+}

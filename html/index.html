@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8">
+    <title>Redis Caching Example</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <script src="/assets/main.js" type="text/javascript" href></script>
+  </head>
+  <body>
+    <h3>Redis Caching Example</h3>
+    <h5>What is this?</h5>
+    <p>This is a display of speed differences between standard database access and cached access.</p>
+
+    <h5>How does it work?</h5>
+    <p>Use one of the following commands to set or get variables (without the brackets)</p>
+    <ul>
+      <li>SET {type} {name} "{value}"</li>
+      <li>GET {name}</li>
+      <li>DEL {name}</li>
+    </ul>
+    <p>Where:</p>
+    <ul>
+      <li>{name} is the variable name</li>
+      <li>{type} is either <strong>int</strong> or <strong>string</strong></li>
+      <li>{value} is
+        <ul>
+          <li>an integer for <strong>int</strong> types (e.g. "-13", "55", "150")</li>
+          <li>a sequence of characters for <strong>string</strong> types (e.g. "hi", "hello, world!")</li>
+        </ul>
+      </li>
+    </ul>
+    <form onsubmit="event.preventDefault(); output.value=post_req(cmd.value);">
+
+      <table>
+        <thead>
+          <th>Input</th>
+          <th>Output</th>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <input type="text" name="cmd" value="">
+              <input class="button" type="submit" value="submit">
+            </td>
+            <td>
+              <output name="output" class="output"></output>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </form>
+
+
+  </body>
+</html>
