@@ -29,7 +29,7 @@
         </ul>
       </li>
     </ul>
-    <form onsubmit="event.preventDefault(); output.value=post_req(cmd.value);">
+    <form onsubmit="event.preventDefault(); post_req(cmd.value).then((o) => output.value = o);">
 
       <table>
         <thead>

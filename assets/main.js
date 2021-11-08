@@ -8,6 +8,7 @@ async function post_req(input) {
     method: 'POST',
     body: JSON.stringify(req_body),
   });
-  let result = await response.json();
+  let result = await request.json();
+  console.log(result);
   return result.output;
 }
