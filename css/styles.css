@@ -5,7 +5,7 @@ body {
   font-family: "Geomanist Book", sans-serif;
 }
 
-p, ul {
+p, ul, i {
   font-size: 20px;
 }
 
@@ -26,7 +26,9 @@ table, td {
   text-align: left;
   vertical-align: top;
 }
-
+form {
+  margin-top: 20px;
+}
 input {
   margin-bottom: 5px;
   padding: 5px;
@@ -44,6 +46,7 @@ input {
 }
 
 .output {
+  white-space: pre-wrap;
   word-wrap: break-word;
   padding: 5px;
   background-color:  #1d4056 ;

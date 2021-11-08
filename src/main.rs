@@ -2,6 +2,7 @@ use tiny_http::{Server, Response, Request, Method, Header};
 use redis;
 use std::{time::Instant, io::{Error, ErrorKind, Cursor}, path::PathBuf, fs::File};
 use json::{JsonValue, parse};
+use postgres::{Client, NoTls};
 
 enum ResponseType {
     File(Response<File>),
@@ -26,6 +27,13 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    let mut postgres_client = Client::connect("postgresql://user:super_secure_password@localhost:5432", NoTls).unwrap();
+
+    postgres_client.batch_execute("CREATE TABLE variable (
+                                     name               VARCHAR NOT NULL,
+                                     data               BYTEA
+                                   )").unwrap();
 
     for mut request in server.incoming_requests() {
 
@@ -134,15 +142,8 @@ fn cache_handler(req: &mut Request, con: &mut redis::Connection) -> Result<Respo
     let now = Instant::now();
     let redis_response: redis::Value = cmd.query(con).map_err(|_e| Error::new(ErrorKind::Other, "Could not apply command to cache"))?;
     let elapsed = now.elapsed();
-    let r = Response::from_string::<String>(format!("{:?}", redis_response).into());
+    let r = Response::from_string::<String>(format!("Cache response: {:?}\nTime taken: {:.2?}", redis_response, elapsed).into());
     Ok(r)
-    //Ok(r)
-    // println!("{:?}", cmd);
-    // match req.method() {
-    //     Method::Post => Response::from_string("POST"),
-    //     Method::Get => Response::from_string("GET"),
-    //     _ => Response::from_string("Method not implemented"),
-    // }
 }
 
 fn get_file(name: &str) -> Result<File, Error> {
@@ -242,6 +243,7 @@ mod functions {
                             Type::Int(i) => Ok(format!("{}", i)),
                         }, _ => Err(Error::new(ErrorKind::Other, "Could not parse variable value")),
                     }?);
+                    cmd.arg("EX").arg(15);
                     Ok(cmd)
                 },
                 _ => Ok(cmd)
@@ -297,7 +299,6 @@ mod functions {
     }
 
     fn i64_value(i: &mut SplitWhitespace) -> Result<i64, Error> {
-        println!("{:?}", i);
         match i.next() {
             Some(i) => i.parse::<i64>().map_err(|_e| Error::new(ErrorKind::Other, "Could not convert value to integer")),
             None => Err(Error::new(ErrorKind::Other, "Value not found")),

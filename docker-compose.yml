@@ -4,9 +4,20 @@ services:
     ports:
       - "6379:6379"
     build: ./docker_redis        
+    restart: always
+    network_mode: host
+  db:
+    image: "postgres:14.0-alpine"
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: super_secure_password
+    ports:
+      - "5432:5432"
     network_mode: host
   web:
     build: .
     ports:
       - "8000:8000"
     network_mode: host
+  

@@ -14,7 +14,7 @@
     <h5>How does it work?</h5>
     <p>Use one of the following commands to set or get variables (without the brackets)</p>
     <ul>
-      <li>SET {type} {name} "{value}"</li>
+      <li>SET {type} {name} {value}</li>
       <li>GET {name}</li>
       <li>DEL {name}</li>
     </ul>
@@ -24,11 +24,12 @@
       <li>{type} is either <strong>int</strong> or <strong>string</strong></li>
       <li>{value} is
         <ul>
-          <li>an integer for <strong>int</strong> types (e.g. "-13", "55", "150")</li>
-          <li>a sequence of characters for <strong>string</strong> types (e.g. "hi", "hello, world!")</li>
+          <li>an integer for <strong>int</strong> types (e.g. -13, 55, 150)</li>
+          <li>a sequence of characters surrounded by quotes for <strong>string</strong> types (e.g. "hi", "hello, world!")</li>
         </ul>
       </li>
     </ul>
+    <i>variables expire from the cache after 15 seconds</i>
     <form onsubmit="event.preventDefault(); post_req(cmd.value).then((o) => output.value = o);">
 
       <table>
