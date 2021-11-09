@@ -1,6 +1,6 @@
 # redis-caching
 Usage:
-Clone repository to `/` and run `sudo docker-compose up` in `/`
+Clone repository to a `/project` directory and run `sudo docker-compose up` in `/project`
 
 Creates 3 containers:
  - A rust server using tiny_http
