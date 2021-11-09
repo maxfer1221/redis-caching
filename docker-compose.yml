@@ -7,14 +7,15 @@ services:
     restart: always
     network_mode: host
   db:
-    image: "postgres:14.0-alpine"
+    image: "mongo"
     restart: always
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: super_secure_password
+      MONGO_INITDB_ROOT_USERNAME: user
+      MONGO_INITDB_ROOT_PASSWORD: password
     ports:
-      - "5432:5432"
+        - "27017:27017"
     network_mode: host
+    command: mongod --quiet --logpath /dev/null 
   web:
     build: .
     ports:

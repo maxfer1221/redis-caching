@@ -2,17 +2,27 @@ use tiny_http::{Server, Response, Request, Method, Header};
 use redis;
 use std::{time::Instant, io::{Error, ErrorKind, Cursor}, path::PathBuf, fs::File};
 use json::{JsonValue, parse};
-use postgres::{Client, NoTls};
+use mongodb::{sync::{Collection, Client}, options::{self, ClientOptions, UpdateModifications}};
+use serde::{Serialize, Deserialize};
+use bson::{doc, document::Document};
 
 enum ResponseType {
     File(Response<File>),
     Curs(Response<Cursor<Vec<u8>>>),
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct Var {
+    name: String,
+    value: String,
+}
+
 fn main() {
 
+    // tiny_http
     let server = Server::http("127.0.0.1:8000").unwrap();
 
+    // Redis
     let redis_client = match redis::Client::open("redis://127.0.0.1:6379") {
         Ok(r) => r,
         Err(e) => {
@@ -28,15 +38,23 @@ fn main() {
         }
     };
 
-    let mut postgres_client = Client::connect("postgresql://user:super_secure_password@localhost:5432", NoTls).unwrap();
+    // MongoDB
+    let client_options = ClientOptions::parse("mongodb://user:password@localhost:27017").unwrap();
+    let mongo_client = match Client::with_options(client_options) {
+        Ok(c) => {
+            println!("ok");
+            c
+        },
+        Err(e) => {
+            println!("Could not connect to mongodb: {:?}", e);
+            std::process::exit(1);
+        }
+    };
+    let mongo_db = mongo_client.database("main");
+    let collection = mongo_db.collection::<Var>("variables");
 
-    postgres_client.batch_execute("CREATE TABLE variable (
-                                     name               VARCHAR NOT NULL,
-                                     data               BYTEA
-                                   )").unwrap();
-
+    // Serve requests
     for mut request in server.incoming_requests() {
-
         let response: ResponseType = match request.url() {
             "/" => ResponseType::File(match root_handler(&request) {
                 Err(e) => {
@@ -44,18 +62,18 @@ fn main() {
                     std::process::exit(1);
                 },Ok(r) => r,
             }),
-            "/cache" => ResponseType::Curs(match cache_handler(&mut request, &mut redis_con) {
+            "/cache" => ResponseType::Curs(match cache_handler(&mut request, &mut redis_con, &collection) {
                 Err(e) => {
                     println!("Error communicating with cache: {:?}", e);
                     Response::from_string(format!("Error communicating with cache: {:?}", e))
                 }, Ok(r) => r,
             }),
-            "/database" => ResponseType::File(match db_handler(&request) {
-                Err(e) => {
-                    println!("Error communicating with database: {:?}", e);
-                    std::process::exit(1);
-                }, Ok(r) => r,
-            }),
+            // "/database" => ResponseType::File(match db_handler(&request) {
+            //     Err(e) => {
+            //         println!("Error communicating with database: {:?}", e);
+            //         std::process::exit(1);
+            //     }, Ok(r) => r,
+            // }),
             "/css/styles.css" => ResponseType::File(match css_response() {
                 Err(e) => {
                     println!("Could not load CSS file: {:?}", e);
@@ -76,15 +94,17 @@ fn main() {
             }),
         };
 
-
+        // respond
         match match response {
             ResponseType::File(mut f) => {
                 f.add_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+                f.add_header(Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"*"[..]).unwrap());
                 f.add_header(Header::from_bytes(&b"Access-Control-Request-Headers"[..], &b"*"[..]).unwrap());
                 request.respond(f)
             },
             ResponseType::Curs(mut c) => {
                 c.add_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+                c.add_header(Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"*"[..]).unwrap());
                 c.add_header(Header::from_bytes(&b"Access-Control-Request-Headers"[..], &b"*"[..]).unwrap());
                 request.respond(c)
             }
@@ -128,21 +148,68 @@ fn root_handler(req: &Request) -> Result<Response<File>, Error> {
     }
 }
 
-fn db_handler(_req: &Request) -> Result<Response<File>, Error> {
-    html_response("html/404.html", 404)
-    // match req.method() {
-    //     Method::Post => Response::from_string("POST"),
-    //     Method::Get => Response::from_string("GET"),
-    //     _ => Response::from_string("Method not implemented"),
-    // }
-}
+// fn db_handler(_req: &Request) -> Result<Response<File>, Error> {
+//     html_response("html/404.html", 404)
+//     match req.method() {
+//         Method::Post => Response::from_string("POST"),
+//         Method::Get => Response::from_string("GET"),
+//         _ => Response::from_string("Method not implemented"),
+//     }
+// }
 
-fn cache_handler(req: &mut Request, con: &mut redis::Connection) -> Result<Response<Cursor<Vec<u8>>>, Error> {
-    let cmd: redis::Cmd = parse_input(req)?;
-    let now = Instant::now();
-    let redis_response: redis::Value = cmd.query(con).map_err(|_e| Error::new(ErrorKind::Other, "Could not apply command to cache"))?;
-    let elapsed = now.elapsed();
-    let r = Response::from_string::<String>(format!("Cache response: {:?}\nTime taken: {:.2?}", redis_response, elapsed).into());
+fn cache_handler(req: &mut Request, con: &mut redis::Connection, col: &Collection<Var>) -> Result<Response<Cursor<Vec<u8>>>, Error> {
+    let pre_cmd: functions::Function = parse_input(req)?;
+    let cmd: redis::Cmd = pre_cmd.command()?;
+    
+    let cache_now = Instant::now();
+    let cache_response: redis::Value = cmd.query(con).map_err(|_e| Error::new(ErrorKind::Other, "Could not apply command to cache"))?;
+    let cache_elapsed = cache_now.elapsed();
+
+    use functions::{Type::*, FunctionType::*};
+
+    let (db_response, db_elapsed) = match pre_cmd.ftype {
+        Set => {
+            let filter: Document = doc! { "name": &pre_cmd.vname };
+            let var: UpdateModifications = UpdateModifications::Document(doc! {
+                "$set": {
+                    "name": pre_cmd.vname,
+                    "value": match pre_cmd.vtype.unwrap() {
+                        Str(s) => s,
+                        Int(i) => format!("{}", i),
+                    },
+                }
+            });
+            let update_op = options::FindOneAndUpdateOptions::builder().upsert(true).build();
+            let db_now = Instant::now();
+            (col.find_one_and_update(filter, var, update_op).map_err(|_e| {
+                println!("{:?}", _e);
+                Error::new(ErrorKind::Other, "Error finding and updating mongodb document")
+            }),
+            db_now.elapsed())
+        },
+        Get => {
+            let filter: Document = doc! { "name": pre_cmd.vname };
+            let db_now = Instant::now();
+            
+            (col.find_one(filter, None).map_err(|_e| {
+                println!("{:?}", _e);
+                Error::new(ErrorKind::Other, "Error finding mongodb document")
+            }),
+            db_now.elapsed())
+        },
+        Del => {
+            let filter: Document = doc! { "name": pre_cmd.vname };
+            let db_now = Instant::now();
+            (col.find_one_and_delete(filter, None).map_err(|_e| Error::new(ErrorKind::Other, "Error finding and deleting mongodb document")),
+            db_now.elapsed())
+        },
+    };
+    let r = Response::from_string::<String>(
+        format!("Cache response: {:?}\nTime taken: {:.2?}\nDB response: {:?}\nTime taken: {:.2?}",
+            cache_response,
+            cache_elapsed,
+            db_response,
+            db_elapsed).into());
     Ok(r)
 }
 
@@ -152,9 +219,10 @@ fn get_file(name: &str) -> Result<File, Error> {
     Ok(File::open(wd)?)
 }
 
-fn parse_input(req: &mut Request) -> Result<redis::Cmd, Error> {
+fn parse_input(req: &mut Request) -> Result<functions::Function, Error> {
     let mut content = String::new();
     req.as_reader().read_to_string(&mut content)?;
+    println!("{:?}", content);
     let json: JsonValue = match parse(&content) {
         Ok(j) => Ok(j),
         Err(_e) => {
@@ -166,7 +234,7 @@ fn parse_input(req: &mut Request) -> Result<redis::Cmd, Error> {
     let iter = cmd_as_string.split_whitespace();
     let cmd = functions::Function::from(iter);
 
-    cmd?.command()
+    cmd
 }
 
 mod functions {
@@ -232,14 +300,14 @@ mod functions {
             }
         }
 
-        pub fn command(self) -> Result<redis::Cmd, Error> {
+        pub fn command(&self) -> Result<redis::Cmd, Error> {
             let mut cmd = redis::Cmd::new();
-            cmd.arg(self.ftype.to_str()).arg(self.vname);
+            cmd.arg(self.ftype.to_str()).arg(&self.vname);
             match self.ftype {
                 FunctionType::Set => {
-                    cmd.arg(match self.vtype {
+                    cmd.arg(match &self.vtype {
                         Some(t) => match t {
-                            Type::Str(s) => Ok(s),
+                            Type::Str(s) => Ok(s.clone()),
                             Type::Int(i) => Ok(format!("{}", i)),
                         }, _ => Err(Error::new(ErrorKind::Other, "Could not parse variable value")),
                     }?);
